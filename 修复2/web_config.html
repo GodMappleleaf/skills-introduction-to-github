@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网络配置</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: #fff; border-radius: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 8px 30px rgba(0,0,0,0.04);
+            width: 100%; max-width: 480px; overflow: hidden;
+        }
+        .header { padding: 24px 28px; border-bottom: 1px solid #f0f0f0; }
+        .header h1 { font-size: 18px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; }
+        .header p { font-size: 13px; color: #888; }
+        .status-bar {
+            display: flex; align-items: center; gap: 8px;
+            padding: 12px 28px; background: #fafffe; border-bottom: 1px solid #f0f0f0;
+        }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; }
+        .status-dot.updating { background: #f59e0b; }
+        .status-text { font-size: 12px; color: #666; }
+        .form-body { padding: 24px 28px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group:last-child { margin-bottom: 0; }
+        .form-label {
+            display: block; font-size: 12px; font-weight: 500; color: #666;
+            margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .form-input {
+            width: 100%; padding: 12px 14px;
+            font-family: "Courier New", monospace; font-size: 14px;
+            color: #1a1a1a; background: #fafafa; border: 1px solid #e5e5e5;
+            border-radius: 8px; outline: none;
+        }
+        .form-input:focus { border-color: #1a1a1a; background: #fff; }
+        .form-input.modified { border-color: #3b82f6; background: #f8fafc; }
+        .form-input[readonly] { background: #f0f0f0; color: #999; }
+        .input-hint { font-size: 11px; color: #aaa; margin-top: 6px; }
+        .actions {
+            display: flex; gap: 12px; padding: 20px 28px;
+            background: #fafafa; border-top: 1px solid #f0f0f0;
+        }
+        .btn {
+            flex: 1; padding: 12px 20px; font-size: 13px; font-weight: 500;
+            border: none; border-radius: 8px; cursor: pointer;
+        }
+        .btn-secondary { background: #fff; color: #666; border: 1px solid #e5e5e5; }
+        .btn-apply { background: #10b981; color: #fff; }
+        .btn-apply:disabled { background: #a7f3d0; cursor: not-allowed; }
+        .toast {
+            position: fixed; bottom: 24px; left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            padding: 12px 20px; color: #fff; font-size: 13px;
+            border-radius: 8px; opacity: 0; transition: all 0.3s ease; z-index: 100;
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+        .toast.success { background: #10b981; }
+        .toast.error { background: #ef4444; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>网络配置</h1>
+        <p>管理设备的网络连接参数</p>
+    </div>
+    <div class="status-bar">
+        <div class="status-dot" id="statusDot"></div>
+        <span class="status-text" id="statusText">已连接</span>
+    </div>
+    <div class="form-body">
+        <div class="form-group">
+            <label class="form-label">IP 地址</label>
+            <!-- SSI 在页面加载时直接把当前 IP 填进去 -->
+            <input type="text" class="form-input" id="ip" value="<!--#echo var="ip" -->">
+            <div class="input-hint">格式：xxx.xxx.xxx.xxx</div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">子网掩码</label>
+            <input type="text" class="form-input" id="mask" value="<!--#echo var="mask" -->">
+            <div class="input-hint">格式：xxx.xxx.xxx.xxx</div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">默认网关</label>
+            <input type="text" class="form-input" id="gw" value="<!--#echo var="gw" -->">
+            <div class="input-hint">格式：xxx.xxx.xxx.xxx</div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">MAC 地址</label>
+            <input type="text" class="form-input" id="mac" value="<!--#echo var="mac" -->" readonly>
+            <div class="input-hint">只读，由硬件决定</div>
+        </div>
+    </div>
+    <div class="actions">
+        <button class="btn btn-secondary" onclick="location.reload()">刷新</button>
+        <button class="btn btn-apply" id="applyBtn" onclick="applyConfig()" disabled>应用</button>
+    </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+    var orig = {};
+
+    window.onload = function() {
+        orig = {
+            ip:   document.getElementById('ip').value,
+            mask: document.getElementById('mask').value,
+            gw:   document.getElementById('gw').value
+        };
+        document.getElementById('ip').oninput   = checkChanges;
+        document.getElementById('mask').oninput = checkChanges;
+        document.getElementById('gw').oninput   = checkChanges;
+    };
+
+    function checkChanges() {
+        var changed =
+            document.getElementById('ip').value !== orig.ip ||
+            document.getElementById('mask').value !== orig.mask ||
+            document.getElementById('gw').value !== orig.gw;
+        document.getElementById('applyBtn').disabled = !changed;
+
+        var ids = ['ip', 'mask', 'gw'];
+        for (var i = 0; i < ids.length; i++) {
+            var el = document.getElementById(ids[i]);
+            if (el.value !== orig[ids[i]]) {
+                el.classList.add('modified');
+            } else {
+                el.classList.remove('modified');
+            }
+        }
+    }
+
+    function applyConfig() {
+        var ip   = document.getElementById('ip').value;
+        var mask = document.getElementById('mask').value;
+        var gw   = document.getElementById('gw').value;
+
+        if (!validateIP(ip) || !validateIP(mask) || !validateIP(gw)) {
+            showToast('请输入有效的 IP 地址', 'error');
+            return;
+        }
+
+        /* ---- 关键：lwIP CGI 接收 application/x-www-form-urlencoded ---- */
+        var body = 'ip='   + encodeURIComponent(ip) +
+                   '&mask=' + encodeURIComponent(mask) +
+                   '&gw='   + encodeURIComponent(gw);
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/netcfg.cgi', true);  /* URI 必须和 tCGI 中注册的一致 */
+        xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === 4) {
+                if (xhr.status === 200 || xhr.status === 302) {
+                    showToast('配置已应用，设备将重启网络...', 'success');
+                    orig = { ip: ip, mask: mask, gw: gw };
+                    document.getElementById('applyBtn').disabled = true;
+                    var inputs = document.querySelectorAll('.form-input');
+                    for (var i = 0; i < inputs.length; i++) inputs[i].classList.remove('modified');
+                    /* 2 秒后刷新页面获取最新状态 */
+                    setTimeout(function(){ location.reload(); }, 2000);
+                } else {
+                    showToast('应用配置失败', 'error');
+                }
+            }
+        };
+        xhr.send(body);
+    }
+
+    function validateIP(v) {
+        var p = v.split('.');
+        if (p.length !== 4) return false;
+        for (var i = 0; i < 4; i++) {
+            var n = parseInt(p[i], 10);
+            if (isNaN(n) || n < 0 || n > 255 || String(n) !== p[i]) return false;
+        }
+        return true;
+    }
+
+    function showToast(msg, type) {
+        var t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className = 'toast ' + (type || '');
+        setTimeout(function() { t.classList.add('show'); }, 10);
+        setTimeout(function() { t.classList.remove('show'); }, 3000);
+    }
+</script>
+</body>
+</html>

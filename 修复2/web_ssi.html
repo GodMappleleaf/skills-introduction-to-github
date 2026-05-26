@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网络配置</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f5f5;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+        .box{background:#fff;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,.06);width:100%;max-width:480px;overflow:hidden}
+        .hd{padding:24px 28px;border-bottom:1px solid #f0f0f0}
+        .hd h1{font-size:18px;font-weight:600;color:#1a1a1a}
+        .hd p{font-size:13px;color:#888;margin-top:4px}
+        .bd{padding:24px 28px}
+        .fg{margin-bottom:20px}
+        .fg:last-child{margin-bottom:0}
+        .fg label{display:block;font-size:12px;font-weight:500;color:#666;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px}
+        .fg input{width:100%;padding:12px 14px;font-family:"Courier New",monospace;font-size:14px;color:#1a1a1a;background:#fafafa;border:1px solid #e5e5e5;border-radius:8px;outline:none}
+        .fg input:focus{border-color:#1a1a1a;background:#fff}
+        .fg input[readonly]{background:#f0f0f0;color:#999}
+        .hint{font-size:11px;color:#aaa;margin-top:6px}
+        .ft{display:flex;gap:12px;padding:20px 28px;background:#fafafa;border-top:1px solid #f0f0f0}
+        .btn{flex:1;padding:12px 20px;font-size:13px;font-weight:500;border:none;border-radius:8px;cursor:pointer}
+        .btn-go{background:#10b981;color:#fff}
+        .btn-go:disabled{background:#a7f3d0;cursor:not-allowed}
+        .btn-re{background:#fff;color:#666;border:1px solid #e5e5e5}
+        .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(100px);padding:12px 20px;color:#fff;font-size:13px;border-radius:8px;opacity:0;transition:.3s;z-index:100}
+        .toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+        .toast.ok{background:#10b981}
+        .toast.err{background:#ef4444}
+    </style>
+</head>
+<body>
+<div class="box">
+    <div class="hd">
+        <h1>网络配置</h1>
+        <p>管理设备的网络连接参数</p>
+    </div>
+    <div class="bd">
+        <div class="fg">
+            <label>IP 地址</label>
+            <!-- SSI 在页面加载时直接把当前 IP 填进去 -->
+            <input type="text" id="ip" value="<!--#ip-->">
+        </div>
+        <div class="fg">
+            <label>子网掩码</label>
+            <input type="text" id="mask" value="<!--#mask-->">
+        </div>
+        <div class="fg">
+            <label>默认网关</label>
+            <input type="text" id="gw" value=<!--#gw-->">
+        </div>
+        <div class="fg">
+            <label>MAC 地址</label>
+            <input type="text" id="mac" value="<!--#mac-->" readonly>
+            <div class="hint">只读，由硬件决定</div>
+        </div>
+    </div>
+    <div class="ft">
+        <button class="btn btn-re" onclick="location.reload()">刷新</button>
+        <button class="btn btn-go" id="applyBtn" onclick="apply()">应用</button>
+    </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+var orig = {};
+window.onload = function() {
+    orig = {
+        ip:   document.getElementById('ip').value,
+        mask: document.getElementById('mask').value,
+        gw:   document.getElementById('gw').value
+    };
+    document.getElementById('ip').oninput   = chk;
+    document.getElementById('mask').oninput = chk;
+    document.getElementById('gw').oninput   = chk;
+};
+function chk() {
+    var d = document.getElementById('ip').value !== orig.ip ||
+            document.getElementById('mask').value !== orig.mask ||
+            document.getElementById('gw').value !== orig.gw;
+    document.getElementById('applyBtn').disabled = !d;
+}
+
+function apply() {
+    var ip   = document.getElementById('ip').value;
+    var mask = document.getElementById('mask').value;
+    var gw   = document.getElementById('gw').value;
+
+    if (!valid(ip) || !valid(mask) || !valid(gw)) {
+        toast('请输入有效的 IP 地址', 'err');
+        return;
+    }
+
+    /* ---- 关键：lwIP CGI 接收 application/x-www-form-urlencoded ---- */
+    var body = 'ip=' + encodeURIComponent(ip) +
+               '&mask=' + encodeURIComponent(mask) +
+               '&gw=' + encodeURIComponent(gw);
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/netcfg.cgi', true);  /* URI 必须和 tCGI 中注册的一致 */
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+            if (xhr.status === 200 || xhr.status === 302) {
+                toast('配置已应用，设备将重启网络...', 'ok');
+                orig = {ip: ip, mask: mask, gw: gw};
+                document.getElementById('applyBtn').disabled = true;
+                /* 2 秒后刷新页面获取最新状态 */
+                setTimeout(function(){ location.reload(); }, 2000);
+            } else {
+                toast('应用失败', 'err');
+            }
+        }
+    };
+    xhr.send(body);
+}
+
+function valid(v) {
+    var p = v.split('.');
+    if (p.length !== 4) return false;
+    for (var i = 0; i < 4; i++) {
+        var n = parseInt(p[i], 10);
+        if (isNaN(n) || n < 0 || n > 255 || String(n) !== p[i]) return false;
+    }
+    return true;
+}
+
+function toast(msg, type) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast ' + type;
+    setTimeout(function(){ t.classList.add('show'); }, 10);
+    setTimeout(function(){ t.classList.remove('show'); }, 3000);
+}
+</script>
+</body>
+</html>
